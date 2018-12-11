@@ -29,7 +29,7 @@ import * as localize from '../common/utils/localize';
 import { IInterpreterService } from '../interpreter/contracts';
 import { captureTelemetry, sendTelemetryEvent } from '../telemetry';
 import { EditorContexts, HistoryMessages, Settings, Telemetry } from './constants';
-import { JupyterInstallError } from './jupyterInstallError';
+import { JupyterInstallError } from './jupyter/jupyterInstallError';
 import {
     CellState,
     ICell,

@@ -48,10 +48,10 @@ import { IEnvironmentVariablesProvider, IEnvironmentVariablesService } from '../
 import { CodeCssGenerator } from '../../client/datascience/codeCssGenerator';
 import { History } from '../../client/datascience/history';
 import { HistoryProvider } from '../../client/datascience/historyProvider';
-import { JupyterExecution } from '../../client/datascience/jupyterExecution';
-import { JupyterExporter } from '../../client/datascience/jupyterExporter';
-import { JupyterImporter } from '../../client/datascience/jupyterImporter';
-import { JupyterServer } from '../../client/datascience/jupyterServer';
+import { JupyterExecution } from '../../client/datascience/jupyter/jupyterExecution';
+import { JupyterExporter } from '../../client/datascience/jupyter/jupyterExporter';
+import { JupyterImporter } from '../../client/datascience/jupyter/jupyterImporter';
+import { JupyterServer } from '../../client/datascience/jupyter/jupyterServer';
 import { StatusProvider } from '../../client/datascience/statusProvider';
 import {
     ICodeCssGenerator,

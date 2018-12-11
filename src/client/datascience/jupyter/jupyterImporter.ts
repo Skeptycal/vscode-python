@@ -6,15 +6,15 @@ import { inject, injectable } from 'inversify';
 import * as os from 'os';
 import * as path from 'path';
 import { Disposable } from 'vscode-jsonrpc';
-import { IWorkspaceService } from '../common/application/types';
-import { IFileSystem } from '../common/platform/types';
-import { IPythonExecutionFactory, IPythonExecutionService } from '../common/process/types';
-import { IConfigurationService, IDisposableRegistry } from '../common/types';
-import { createDeferred, Deferred } from '../common/utils/async';
-import * as localize from '../common/utils/localize';
-import { IInterpreterService } from '../interpreter/contracts';
-import { CodeSnippits } from './constants';
-import { IJupyterExecution, INotebookImporter } from './types';
+import { IWorkspaceService } from '../../common/application/types';
+import { IFileSystem } from '../../common/platform/types';
+import { IPythonExecutionFactory, IPythonExecutionService } from '../../common/process/types';
+import { IConfigurationService, IDisposableRegistry } from '../../common/types';
+import { createDeferred, Deferred } from '../../common/utils/async';
+import * as localize from '../../common/utils/localize';
+import { IInterpreterService } from '../../interpreter/contracts';
+import { CodeSnippits } from '../constants';
+import { IJupyterExecution, INotebookImporter } from '../types';
 
 @injectable()
 export class JupyterImporter implements INotebookImporter {

@@ -10,9 +10,9 @@ import { URL } from 'url';
 import * as uuid from 'uuid/v4';
 import { CancellationToken, Disposable } from 'vscode-jsonrpc';
 
-import { Cancellation, CancellationError } from '../common/cancellation';
-import { IS_WINDOWS } from '../common/platform/constants';
-import { IFileSystem, TemporaryDirectory } from '../common/platform/types';
+import { Cancellation, CancellationError } from '../../common/cancellation';
+import { IS_WINDOWS } from '../../common/platform/constants';
+import { IFileSystem, TemporaryDirectory } from '../../common/platform/types';
 import {
     ExecutionResult,
     IProcessService,
@@ -20,23 +20,23 @@ import {
     IPythonExecutionFactory,
     ObservableExecutionResult,
     SpawnOptions
-} from '../common/process/types';
-import { IAsyncDisposableRegistry, IDisposableRegistry, ILogger } from '../common/types';
-import * as localize from '../common/utils/localize';
-import { noop } from '../common/utils/misc';
-import { EXTENSION_ROOT_DIR } from '../constants';
+} from '../../common/process/types';
+import { IAsyncDisposableRegistry, IDisposableRegistry, ILogger } from '../../common/types';
+import * as localize from '../../common/utils/localize';
+import { noop } from '../../common/utils/misc';
+import { EXTENSION_ROOT_DIR } from '../../constants';
 import {
     ICondaService,
     IInterpreterService,
     IKnownSearchPathsForInterpreters,
     InterpreterType,
     PythonInterpreter
-} from '../interpreter/contracts';
-import { IServiceContainer } from '../ioc/types';
-import { captureTelemetry } from '../telemetry';
-import { Telemetry } from './constants';
+} from '../../interpreter/contracts';
+import { IServiceContainer } from '../../ioc/types';
+import { captureTelemetry } from '../../telemetry';
+import { Telemetry } from '../constants';
 import { JupyterConnection, JupyterServerInfo } from './jupyterConnection';
-import { IConnection, IJupyterExecution, IJupyterKernelSpec, INotebookServer } from './types';
+import { IConnection, IJupyterExecution, IJupyterKernelSpec, INotebookServer } from '../types';
 
 const CheckJupyterRegEx = IS_WINDOWS ? /^jupyter?\.exe$/ : /^jupyter?$/;
 const NotebookCommand = 'notebook';

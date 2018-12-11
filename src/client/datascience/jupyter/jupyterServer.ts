@@ -1,7 +1,7 @@
 // Copyright (c) Microsoft Corporation. All rights reserved.
 // Licensed under the MIT License.
 'use strict';
-import '../common/extensions';
+import '../../common/extensions';
 
 import { nbformat } from '@jupyterlab/coreutils';
 import {
@@ -22,15 +22,15 @@ import { Subscriber } from 'rxjs/Subscriber';
 import * as vscode from 'vscode';
 import { CancellationToken } from 'vscode-jsonrpc';
 
-import { IWorkspaceService } from '../common/application/types';
-import { Cancellation, CancellationError } from '../common/cancellation';
-import { IAsyncDisposableRegistry, IDisposable, IDisposableRegistry, ILogger } from '../common/types';
-import { createDeferred, Deferred, sleep } from '../common/utils/async';
-import * as localize from '../common/utils/localize';
-import { noop } from '../common/utils/misc';
-import { generateCells } from './cellFactory';
-import { concatMultilineString } from './common';
-import { CellState, ICell, IConnection, IJupyterKernelSpec, INotebookServer, InterruptResult } from './types';
+import { IWorkspaceService } from '../../common/application/types';
+import { Cancellation, CancellationError } from '../../common/cancellation';
+import { IAsyncDisposableRegistry, IDisposable, IDisposableRegistry, ILogger } from '../../common/types';
+import { createDeferred, Deferred, sleep } from '../../common/utils/async';
+import * as localize from '../../common/utils/localize';
+import { noop } from '../../common/utils/misc';
+import { generateCells } from '../cellFactory';
+import { concatMultilineString } from '../common';
+import { CellState, ICell, IConnection, IJupyterKernelSpec, INotebookServer, InterruptResult } from '../types';
 
 class CellSubscriber {
     private deferred : Deferred<CellState> = createDeferred<CellState>();

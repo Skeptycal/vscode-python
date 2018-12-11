@@ -16,7 +16,7 @@ import { IProcessServiceFactory } from '../../client/common/process/types';
 import { createDeferred } from '../../client/common/utils/async';
 import { noop } from '../../client/common/utils/misc';
 import { concatMultilineString } from '../../client/datascience/common';
-import { JupyterExecution } from '../../client/datascience/jupyterExecution';
+import { JupyterExecution } from '../../client/datascience/jupyter/jupyterExecution';
 import {
     CellState,
     ICell,
