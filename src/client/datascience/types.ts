@@ -9,6 +9,7 @@ import { CancellationToken, CodeLens, CodeLensProvider, Disposable, Event, Range
 import { ICommandManager } from '../common/application/types';
 import { IDisposable } from '../common/types';
 import { PythonInterpreter } from '../interpreter/contracts';
+import { Kernel, KernelMessage } from '@jupyterlab/services/lib/kernel';
 
 // Main interface
 export const IDataScience = Symbol('IDataScience');
@@ -39,7 +40,6 @@ export const INotebookServer = Symbol('INotebookServer');
 export interface INotebookServer extends Disposable {
     onStatusChanged: Event<boolean>;
     connect(conninfo: IConnection, kernelSpec: IJupyterKernelSpec, cancelToken?: CancellationToken, workingDir?: string) : Promise<void>;
-    getCurrentState() : Promise<ICell[]>;
     executeObservable(code: string, file: string, line: number) : Observable<ICell[]>;
     execute(code: string, file: string, line: number, cancelToken?: CancellationToken) : Promise<ICell[]>;
     restartKernel() : Promise<void>;
@@ -58,6 +58,19 @@ export interface IJupyterExecution {
     spawnNotebook(file: string) : Promise<void>;
     importNotebook(file: string, template: string) : Promise<string>;
     getUsableJupyterPython(cancelToken?: CancellationToken) : Promise<PythonInterpreter | undefined>;
+}
+
+export const IJupyterSession = Symbol('IJupyterSession');
+export interface IJupyterSession extends IDisposable {
+    onRestarted: Event<void>;
+    restart() : Promise<void>;
+    interrupt() : Promise<void>;
+    waitForIdle() : Promise<void>;
+    requestExecute(content: KernelMessage.IExecuteRequest, disposeOnDone?: boolean, metadata?: JSONObject) : Kernel.IFuture;
+}
+export const IJupyterSessionManager = Symbol('IJupyterSessionManager');
+export interface IJupyterSessionManager {
+    startNew(connInfo: IConnection, kernelSpec: IJupyterKernelSpec, cancelToken?: CancellationToken) : Promise<IJupyterSession>;
 }
 
 export interface IJupyterKernelSpec extends IDisposable {

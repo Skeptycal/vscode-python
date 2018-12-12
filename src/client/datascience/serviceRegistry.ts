@@ -26,8 +26,11 @@ import {
     INotebookExporter,
     INotebookImporter,
     INotebookServer,
-    IStatusProvider
+    IStatusProvider,
+    IJupyterSessionManager,
+    IJupyterSession
 } from './types';
+import { JupyterSessionManager } from './jupyter/jupyterSessionManager';
 
 export function registerTypes(serviceManager: IServiceManager) {
     serviceManager.addSingleton<IDataScienceCodeLensProvider>(IDataScienceCodeLensProvider, DataScienceCodeLensProvider);
@@ -41,5 +44,6 @@ export function registerTypes(serviceManager: IServiceManager) {
     serviceManager.add<INotebookServer>(INotebookServer, JupyterServer);
     serviceManager.addSingleton<ICodeCssGenerator>(ICodeCssGenerator, CodeCssGenerator);
     serviceManager.addSingleton<IStatusProvider>(IStatusProvider, StatusProvider);
+    serviceManager.addSingleton<IJupyterSessionManager>(IJupyterSessionManager, JupyterSessionManager);
     serviceManager.add<ICodeWatcher>(ICodeWatcher, CodeWatcher);
 }

@@ -29,12 +29,15 @@ import {
 import {
     IInterpreterService,
     IKnownSearchPathsForInterpreters,
-    PythonInterpreter
+    PythonInterpreter,
+    InterpreterType
 } from '../../client/interpreter/contracts';
 import { ICellViewModel } from '../../datascience-ui/history-react/cell';
 import { generateTestState } from '../../datascience-ui/history-react/mainPanelState';
 import { sleep } from '../core';
 import { DataScienceIocContainer } from './dataScienceIocContainer';
+import { Architecture } from '../../client/common/utils/platform';
+import { SupportedCommands } from './mockJupyter';
 
 // tslint:disable:no-any no-multiline-string max-func-body-length no-console max-classes-per-file
 suite('Jupyter notebook tests', () => {
@@ -44,11 +47,24 @@ suite('Jupyter notebook tests', () => {
     let ioc: DataScienceIocContainer;
     let modifiedConfig = false;
 
+    const workingPython: PythonInterpreter = {
+        path: '/foo/bar/python.exe',
+        version: '3.6.6.6',
+        sysVersion: '1.0.0.0',
+        sysPrefix: 'Python',
+        type: InterpreterType.Unknown,
+        architecture: Architecture.x64,
+        version_info: [3, 6, 6, 'final']
+    };
+
     setup(() => {
         ioc = new DataScienceIocContainer();
         ioc.registerDataScienceTypes();
         jupyterExecution = ioc.serviceManager.get<IJupyterExecution>(IJupyterExecution);
         processFactory = ioc.serviceManager.get<IProcessServiceFactory>(IProcessServiceFactory);
+        if (ioc.mockJupyter) {
+            ioc.mockJupyter.addInterpreter(workingPython, SupportedCommands.all);
+        }
     });
 
     teardown(async () => {

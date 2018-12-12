@@ -25,7 +25,7 @@ import { CurrentProcess } from '../../client/common/process/currentProcess';
 import { BufferDecoder } from '../../client/common/process/decoder';
 import { ProcessServiceFactory } from '../../client/common/process/processFactory';
 import { PythonExecutionFactory } from '../../client/common/process/pythonExecutionFactory';
-import { IBufferDecoder, IProcessServiceFactory, IPythonExecutionFactory } from '../../client/common/process/types';
+import { IBufferDecoder, IProcessServiceFactory, IPythonExecutionFactory, IProcessService, ExecutionResult, ObservableExecutionResult, Output, IPythonExecutionService } from '../../client/common/process/types';
 import { Bash } from '../../client/common/terminal/environmentActivationProviders/bash';
 import { CommandPromptAndPowerShell } from '../../client/common/terminal/environmentActivationProviders/commandPrompt';
 import {
@@ -62,6 +62,7 @@ import {
     INotebookImporter,
     INotebookServer,
     IStatusProvider,
+    IJupyterSessionManager,
 } from '../../client/datascience/types';
 import { InterpreterComparer } from '../../client/interpreter/configuration/interpreterComparer';
 import { PythonPathUpdaterService } from '../../client/interpreter/configuration/pythonPathUpdaterService';
@@ -124,6 +125,9 @@ import { VirtualEnvironmentManager } from '../../client/interpreter/virtualEnvs'
 import { IVirtualEnvironmentManager } from '../../client/interpreter/virtualEnvs/types';
 import { UnitTestIocContainer } from '../unittests/serviceRegistry';
 import { MockCommandManager } from './mockCommandManager';
+import { Observable } from 'rxjs/Observable';
+import { JupyterSessionManager } from '../../client/datascience/jupyter/jupyterSessionManager';
+import { MockJupyter } from './mockJupyter';
 
 export class DataScienceIocContainer extends UnitTestIocContainer {
 
@@ -131,9 +135,13 @@ export class DataScienceIocContainer extends UnitTestIocContainer {
     private commandManager : MockCommandManager = new MockCommandManager();
     private setContexts : { [name: string] : boolean } = {};
     private contextSetEvent : EventEmitter<{name: string; value: boolean}> = new EventEmitter<{name: string; value: boolean}>();
+    private jupyterMock: MockJupyter | undefined;
+    private shouldMockJupyter: boolean;
 
     constructor() {
         super();
+        const isRollingBuild = process.env ? process.env.VSCODE_PYTHON_ROLLING !== undefined : false;
+        this.shouldMockJupyter = !isRollingBuild;
     }
 
     public get onContextSet() : Event<{name: string; value: boolean}> {
@@ -169,7 +177,6 @@ export class DataScienceIocContainer extends UnitTestIocContainer {
         const workspaceService = TypeMoq.Mock.ofType<IWorkspaceService>();
         const configurationService = TypeMoq.Mock.ofType<IConfigurationService>();
         const interpreterDisplay = TypeMoq.Mock.ofType<IInterpreterDisplay>();
-        const currentProcess = new CurrentProcess();
 
         // Setup default settings
         this.pythonSettings.datascience = {
@@ -251,15 +258,11 @@ export class DataScienceIocContainer extends UnitTestIocContainer {
         this.serviceManager.addSingleton<IVirtualEnvironmentManager>(IVirtualEnvironmentManager, VirtualEnvironmentManager);
 
         this.serviceManager.addSingletonInstance<ILogger>(ILogger, logger.object);
-        this.serviceManager.addSingleton<IPythonExecutionFactory>(IPythonExecutionFactory, PythonExecutionFactory);
-        this.serviceManager.addSingleton<IInterpreterService>(IInterpreterService, InterpreterService);
         this.serviceManager.addSingletonInstance<ICondaService>(ICondaService, condaService.object);
         this.serviceManager.addSingletonInstance<IApplicationShell>(IApplicationShell, appShell.object);
         this.serviceManager.addSingletonInstance<IDocumentManager>(IDocumentManager, documentManager.object);
         this.serviceManager.addSingletonInstance<IWorkspaceService>(IWorkspaceService, workspaceService.object);
         this.serviceManager.addSingletonInstance<IConfigurationService>(IConfigurationService, configurationService.object);
-        this.serviceManager.addSingletonInstance<ICurrentProcess>(ICurrentProcess, currentProcess);
-        this.serviceManager.addSingleton<IProcessServiceFactory>(IProcessServiceFactory, ProcessServiceFactory);
         this.serviceManager.addSingleton<IBufferDecoder>(IBufferDecoder, BufferDecoder);
         this.serviceManager.addSingleton<IEnvironmentVariablesService>(IEnvironmentVariablesService, EnvironmentVariablesService);
         this.serviceManager.addSingletonInstance<IEnvironmentVariablesProvider>(IEnvironmentVariablesProvider, envVarsProvider.object);
@@ -294,6 +297,18 @@ export class DataScienceIocContainer extends UnitTestIocContainer {
         this.serviceManager.addSingleton<IPythonPathUpdaterServiceFactory>(IPythonPathUpdaterServiceFactory, PythonPathUpdaterServiceFactory);
         this.serviceManager.addSingleton<IPythonPathUpdaterServiceManager>(IPythonPathUpdaterServiceManager, PythonPathUpdaterService);
 
+        // Create our jupyter mock if necessary
+        if (this.shouldMockJupyter) {
+            this.jupyterMock = new MockJupyter(this.serviceManager);
+        } else {
+            const currentProcess = new CurrentProcess();
+            this.serviceManager.addSingletonInstance<ICurrentProcess>(ICurrentProcess, currentProcess);
+            this.serviceManager.addSingleton<IProcessServiceFactory>(IProcessServiceFactory, ProcessServiceFactory);
+            this.serviceManager.addSingleton<IPythonExecutionFactory>(IPythonExecutionFactory, PythonExecutionFactory);
+            this.serviceManager.addSingleton<IInterpreterService>(IInterpreterService, InterpreterService);
+            this.serviceManager.addSingleton<IJupyterSessionManager>(IJupyterSessionManager, JupyterSessionManager);
+        }
+
         if (this.serviceManager.get<IPlatformService>(IPlatformService).isWindows) {
             this.serviceManager.addSingleton<IRegistry>(IRegistry, RegistryImplementation);
         }
@@ -318,7 +333,6 @@ export class DataScienceIocContainer extends UnitTestIocContainer {
 
         const interpreterManager = this.serviceContainer.get<IInterpreterService>(IInterpreterService);
         interpreterManager.initialize();
-
     }
 
     public createMoqWorkspaceFolder(folderPath: string) {
@@ -339,6 +353,10 @@ export class DataScienceIocContainer extends UnitTestIocContainer {
         this.pythonSettings.emit('change');
     }
 
+    public get mockJupyter() : MockJupyter | undefined {
+        return this.jupyterMock;
+    }
+
     private findPythonPath(): string {
         try {
             const output = child_process.execFileSync('python', ['-c', 'import sys;print(sys.executable)'], { encoding: 'utf8' });
@@ -346,6 +364,74 @@ export class DataScienceIocContainer extends UnitTestIocContainer {
         } catch (ex) {
             return 'python';
         }
+    }
+
+    private argsMatch(matchers: (string | RegExp)[], args: string[]): boolean {
+        if (matchers.length === args.length) {
+            return args.every((s, i) => {
+                const r = matchers[i] as RegExp;
+                return r && r.test ? r.test(s) : s === matchers[i];
+            });
+        }
+        return false;
+    }
+
+    private setupProcessServiceExec(service: TypeMoq.IMock<IProcessService>, file: string, args: (string | RegExp)[], result: Promise<ExecutionResult<string>>) {
+        service.setup(x => x.exec(
+            TypeMoq.It.isValue(file),
+            TypeMoq.It.is(a => this.argsMatch(args, a)),
+            TypeMoq.It.isAny()))
+            .returns(() => result);
+    }
+
+    private setupProcessServiceExecWithFunc(service: TypeMoq.IMock<IProcessService>, file: string, args: (string | RegExp)[], result: () => Promise<ExecutionResult<string>>) {
+        service.setup(x => x.exec(
+            TypeMoq.It.isValue(file),
+            TypeMoq.It.is(a => this.argsMatch(args, a)),
+            TypeMoq.It.isAny()))
+            .returns(result);
+    }
+
+    private setupProcessServiceExecObservable(service: TypeMoq.IMock<IProcessService>, file: string, args: (string | RegExp)[], stderr: string[], stdout: string[]) {
+        const result: ObservableExecutionResult<string> = {
+            proc: undefined,
+            out: new Observable<Output<string>>(subscriber => {
+                stderr.forEach(s => subscriber.next({ source: 'stderr', out: s }));
+                stdout.forEach(s => subscriber.next({ source: 'stderr', out: s }));
+            }),
+            dispose: () => {
+                noop();
+            }
+        };
+
+        service.setup(x => x.execObservable(
+            TypeMoq.It.isValue(file),
+            TypeMoq.It.is(a => this.argsMatch(args, a)),
+            TypeMoq.It.isAny()))
+            .returns(() => result);
+    }
+
+    private setupPythonService(service: TypeMoq.IMock<IPythonExecutionService>, module: string, args: (string | RegExp)[], result: Promise<ExecutionResult<string>>) {
+        service.setup(x => x.execModule(
+            TypeMoq.It.isValue(module),
+            TypeMoq.It.is(a => this.argsMatch(args, a)),
+            TypeMoq.It.isAny()))
+            .returns(() => result);
+    }
+
+    private setupMockJupyterClasses(mockJupyter: boolean) {
+        if (mockJupyter) {
+            // We need to mock the following:
+            // - IPythonExecutionFactory, IPythonExecutionService returned from the factory
+            // - IInterpreterService,
+            // - IJupyterSessionManager
+            // - IProcessExecutionFactory, IProcessExecutionService returned from the factory
+
+            // First the python execution factory
+
+        } else {
+        }
+
     }
 
 }
