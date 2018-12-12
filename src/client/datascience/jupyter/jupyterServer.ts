@@ -371,16 +371,23 @@ export class JupyterServer implements INotebookServer, IDisposable {
 
     private generateRequest = (code: string, silent: boolean) : Kernel.IFuture | undefined => {
         //this.logger.logInformation(`Executing code in jupyter : ${code}`)
-        return this.session ? this.session.requestExecute(
-            {
-                // Replace windows line endings with unix line endings.
-                code: code.replace(/\r\n/g, '\n'),
-                stop_on_error: false,
-                allow_stdin: false,
-                silent: silent
-            },
-            true
-        ) : undefined;
+        try {
+            return this.session ? this.session.requestExecute(
+                {
+                    // Replace windows line endings with unix line endings.
+                    code: code.replace(/\r\n/g, '\n'),
+                    stop_on_error: false,
+                    allow_stdin: false,
+                    silent: silent
+                },
+                true
+            ) : undefined;
+        } catch (exc) {
+            // Any errors generating a request should just be logged. User can't do anything about it.
+            this.logger.logError(exc);
+        }
+
+        return undefined;
     }
 
     // Set up our initial plotting and imports

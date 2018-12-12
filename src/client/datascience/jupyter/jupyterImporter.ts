@@ -33,22 +33,15 @@ export class JupyterImporter implements INotebookImporter {
 {{ cell.source | comment_lines }}
 {% endblock markdowncell %}`;
 
-    private pythonExecutionService : Deferred<IPythonExecutionService> | undefined;
     private templatePromise : Promise<string>;
-    private settingsChangedDiposable : Disposable;
 
     constructor(
-        @inject(IPythonExecutionFactory) private executionFactory: IPythonExecutionFactory,
         @inject(IFileSystem) private fileSystem: IFileSystem,
         @inject(IDisposableRegistry) private disposableRegistry: IDisposableRegistry,
-        @inject(IInterpreterService) private interpreterService: IInterpreterService,
         @inject(IConfigurationService) private configuration: IConfigurationService,
         @inject(IJupyterExecution) private jupyterExecution : IJupyterExecution,
         @inject(IWorkspaceService) private workspaceService: IWorkspaceService) {
-
-        this.settingsChangedDiposable = this.interpreterService.onDidChangeInterpreter(this.onSettingsChanged);
         this.templatePromise = this.createTemplateFile();
-        this.createExecutionServicePromise();
     }
 
     public importFromFile = async (file: string) : Promise<string> => {
@@ -76,7 +69,6 @@ export class JupyterImporter implements INotebookImporter {
 
     public dispose = () => {
         this.isDisposed = true;
-        this.settingsChangedDiposable.dispose();
     }
 
     private addDirectoryChange = (pythonOutput: string, directoryChange: string): string => {
@@ -119,19 +111,5 @@ export class JupyterImporter implements INotebookImporter {
 
         // Now we should have a template that will convert
         return file.filePath;
-    }
-
-    private onSettingsChanged = () => {
-        // Recreate our promise for our execution service whenever the settings change
-        this.createExecutionServicePromise();
-    }
-
-    private createExecutionServicePromise = () => {
-        // Create a deferred promise that resolves when we have an execution service
-        this.pythonExecutionService = createDeferred<IPythonExecutionService>();
-        this.executionFactory
-            .create({})
-            .then((p : IPythonExecutionService) => { if (this.pythonExecutionService) { this.pythonExecutionService.resolve(p); } })
-            .catch(err => { if (this.pythonExecutionService) { this.pythonExecutionService.reject(err); } });
     }
 }

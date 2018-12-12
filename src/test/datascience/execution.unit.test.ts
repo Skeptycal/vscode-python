@@ -39,6 +39,8 @@ import { KnownSearchPathsForInterpreters } from '../../client/interpreter/locato
 import { ServiceContainer } from '../../client/ioc/container';
 import { getOSType, OSType } from '../common';
 import { noop } from '../core';
+import { MockJupyter } from './mockJupyter';
+import { ServiceManager } from '../../client/ioc/serviceManager';
 
 // tslint:disable:no-any no-http-string no-multiline-string max-func-body-length
 class MockJupyterServer implements INotebookServer {
@@ -447,6 +449,10 @@ suite('Jupyter Execution', async () => {
         when(fileSystem.createDirectory(anything())).thenResolve();
         when(fileSystem.deleteDirectory(anything())).thenResolve();
 
+        const serviceManager = mock(ServiceManager);
+
+        const mockSessionManager = new MockJupyter(instance(serviceManager));
+
         return new JupyterExecution(
             instance(executionFactory),
             instance(condaService),
@@ -457,6 +463,7 @@ suite('Jupyter Execution', async () => {
             disposableRegistry,
             disposableRegistry,
             instance(fileSystem),
+            mockSessionManager,
             instance(serviceContainer));
     }
 

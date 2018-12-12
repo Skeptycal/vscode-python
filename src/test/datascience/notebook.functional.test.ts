@@ -174,11 +174,7 @@ suite('Jupyter notebook tests', () => {
         runTest('MimeTypes', async () => {
             // Test all mime types together so we don't have to startup and shutdown between
             // each
-            const mimeTestDir = path.join(EXTENSION_ROOT_DIR, 'src', 'test', 'datascience');
-            const server = await jupyterExecution.connectToNotebookServer(undefined, true, undefined, mimeTestDir);
-            if (!server) {
-                assert.fail('Server not created');
-            }
+            const server = await createNotebookServer(true);
             let statusCount: number = 0;
             if (server) {
                 server.onStatusChanged((bool: boolean) => {
@@ -207,11 +203,24 @@ suite('Jupyter notebook tests', () => {
         });
     }
 
-    runTest('Creation', async () => {
-        const server = await jupyterExecution.connectToNotebookServer(undefined, true);
-        if (!server) {
-            assert.fail('Server not created');
+    async function createNotebookServer(useDefaultConfig: boolean, expectFailure?: boolean) : Promise<INotebookServer | undefined> {
+        // Catch exceptions. Throw a specific assertion if the promise fails
+        try {
+            const testDir = path.join(EXTENSION_ROOT_DIR, 'src', 'test', 'datascience');
+            const server = await jupyterExecution.connectToNotebookServer(undefined, useDefaultConfig, undefined, testDir);
+            if (expectFailure) {
+                assert.ok(false, `Expected server to not be created`);
+            }
+            return server;
+        } catch (exc) {
+            if (!expectFailure) {
+                assert.ok(false, `Expected server to be created, but got ${exc}`);
+            }
         }
+    }
+
+    runTest('Creation', async () => {
+        await createNotebookServer(true);
     });
 
     runTest('Failure', async () => {
@@ -223,9 +232,7 @@ suite('Jupyter notebook tests', () => {
         }
         ioc.serviceManager.rebind<IJupyterExecution>(IJupyterExecution, FailedProcess);
         jupyterExecution = ioc.serviceManager.get<IJupyterExecution>(IJupyterExecution);
-        return assertThrows(async () => {
-            await jupyterExecution.connectToNotebookServer(undefined, true);
-        }, 'Server start is not throwing');
+        await createNotebookServer(true, true);
     });
 
     test('Not installed', async () => {
@@ -267,10 +274,7 @@ suite('Jupyter notebook tests', () => {
         ioc.serviceManager.rebind<IInterpreterService>(IInterpreterService, EmptyInterpreterService);
         ioc.serviceManager.rebind<IKnownSearchPathsForInterpreters>(IKnownSearchPathsForInterpreters, EmptyPathService);
         jupyterExecution = ioc.serviceManager.get<IJupyterExecution>(IJupyterExecution);
-
-        return assertThrows(async () => {
-            await jupyterExecution.connectToNotebookServer(undefined, true);
-        }, 'Server start is not throwing');
+        await createNotebookServer(true, true);
     });
 
     runTest('Export/Import', async () => {
@@ -316,10 +320,7 @@ suite('Jupyter notebook tests', () => {
     });
 
     runTest('Restart kernel', async () => {
-        const server = await jupyterExecution.connectToNotebookServer(undefined, true);
-        if (!server) {
-            assert.fail('Server not created');
-        }
+        const server = await createNotebookServer(true);
 
         // Setup some state and verify output is correct
         await verifySimple(server, `a=1${os.EOL}a`, 1);
@@ -406,6 +407,7 @@ suite('Jupyter notebook tests', () => {
         let interrupted = false;
         let finishedBefore = false;
         const finishedPromise = createDeferred();
+        let error;
         const observable = server!.executeObservable(code, 'foo.py', 0);
         let cells : ICell[] = [];
         observable.subscribe(c => {
@@ -418,7 +420,7 @@ suite('Jupyter notebook tests', () => {
                 finishedBefore = !interrupted;
                 finishedPromise.resolve();
             }
-        }, (err) => finishedPromise.reject(err), () => finishedPromise.resolve());
+        }, (err) => { error = err; finishedPromise.resolve(); }, () => finishedPromise.resolve());
 
         // Then interrupt
         interrupted = true;
@@ -427,6 +429,7 @@ suite('Jupyter notebook tests', () => {
         // Then we should get our finish unless there was a restart
         await Promise.race([finishedPromise.promise, sleep(sleepMs)]);
         assert.equal(finishedBefore, false, 'Finished before the interruption');
+        assert.equal(error, undefined, 'Error thrown during interrupt');
         assert.ok(finishedPromise.completed ||
             result === InterruptResult.TimedOut ||
             result === InterruptResult.Restarted,
@@ -436,11 +439,7 @@ suite('Jupyter notebook tests', () => {
     }
 
     runTest('Interrupt kernel', async () => {
-        const interrTestDir = path.join(EXTENSION_ROOT_DIR, 'src', 'test', 'datascience');
-        const server = await jupyterExecution.connectToNotebookServer(undefined, true, undefined, interrTestDir);
-        if (!server) {
-            assert.fail('Server not created');
-        }
+        const server = await createNotebookServer(true);
 
         // Try with something we can interrupt
         let interruptResult = await interruptExecute(server,
@@ -586,21 +585,28 @@ plt.show()`,
     }
 
     runTest('Non default config fails', async () => {
-        await generateNonDefaultConfig();
-        try {
-            await jupyterExecution.connectToNotebookServer(undefined, false);
-            assert.fail('Should not be able to connect to notebook server with bad config');
-        } catch {
-            noop();
+        if (!ioc.mockJupyter) {
+            await generateNonDefaultConfig();
+            try {
+                await createNotebookServer(false);
+                assert.fail('Should not be able to connect to notebook server with bad config');
+            } catch {
+                noop();
+            }
+        } else {
+            // In the mock case, just make sure not using a config works
+            await createNotebookServer(false);
         }
     });
 
     runTest('Non default config does not mess up default config', async () => {
-        await generateNonDefaultConfig();
-        const server = await jupyterExecution.connectToNotebookServer(undefined, true);
-        assert.ok(server, 'Never connected to a default server with a bad default config');
+        if (!ioc.mockJupyter) {
+            await generateNonDefaultConfig();
+            const server = await createNotebookServer(true);
+            assert.ok(server, 'Never connected to a default server with a bad default config');
 
-        await verifySimple(server, `a=1${os.EOL}a`, 1);
+            await verifySimple(server, `a=1${os.EOL}a`, 1);
+        }
     });
 
     // Tests that should be running:

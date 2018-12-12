@@ -71,6 +71,7 @@ export interface IJupyterSession extends IDisposable {
 export const IJupyterSessionManager = Symbol('IJupyterSessionManager');
 export interface IJupyterSessionManager {
     startNew(connInfo: IConnection, kernelSpec: IJupyterKernelSpec, cancelToken?: CancellationToken) : Promise<IJupyterSession>;
+    getActiveKernelSpecs(connInfo: IConnection) : Promise<IJupyterKernelSpec[]>;
 }
 
 export interface IJupyterKernelSpec extends IDisposable {

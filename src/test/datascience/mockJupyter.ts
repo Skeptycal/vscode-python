@@ -48,6 +48,8 @@ import { nbformat } from '@jupyterlab/coreutils';
 import { generateCells } from '../../client/datascience/cellFactory';
 import { KernelMessage, Kernel } from '@jupyterlab/services';
 import { createDeferred, Deferred } from '../../client/common/utils/async';
+import { MockPythonService } from './mockPythonService';
+import { MockProcessService } from './mockProcessService';
 
 // tslint:disable:no-any no-http-string no-multiline-string max-func-body-length
 
@@ -223,7 +225,7 @@ class MockJupyterSession implements IJupyterSession {
 export class MockJupyter implements IJupyterSessionManager {
     private pythonExecutionFactory = this.createTypeMoq<IPythonExecutionFactory>('Python Exec Factory');
     private processServiceFactory = this.createTypeMoq<IProcessServiceFactory>('Process Exec Factory');;
-    private processService: TypeMoq.IMock<IProcessService>;
+    private processService: MockProcessService = new MockProcessService();
     private interpreterService = this.createTypeMoq<IInterpreterService>('Interpreter Service');
     private ipykernelInstallCount: number = 0;
     private asyncRegistry : IAsyncDisposableRegistry;
@@ -238,11 +240,8 @@ export class MockJupyter implements IJupyterSessionManager {
         // Save async registry. Need to stick servers created into it
         this.asyncRegistry = serviceManager.get<IAsyncDisposableRegistry>(IAsyncDisposableRegistry);
 
-        // Setup our default process service.
-        this.processService = this.createTypeMoq<IProcessService>('Process Service');
-
         // Make our process service factory always return this item
-        this.processServiceFactory.setup(p => p.create()).returns(() => Promise.resolve(this.processService.object));
+        this.processServiceFactory.setup(p => p.create()).returns(() => Promise.resolve(this.processService));
 
         // Setup our interpreter service
         this.interpreterService.setup(i => i.onDidChangeInterpreter).returns(() => this.changedInterpreterEvent.event);
@@ -274,10 +273,10 @@ export class MockJupyter implements IJupyterSessionManager {
         this.installedInterpreters.push(interpreter);
 
         // Add the python calls first.
-        const pythonService = this.createTypeMoq<IPythonExecutionService>(`PES: ${supportedCommands}`);
+        const pythonService = new MockPythonService(interpreter);
         this.pythonExecutionFactory.setup(f => f.create(TypeMoq.It.is(o => {
             return o && o.pythonPath && o.pythonPath === interpreter.path;
-        }))).returns(() => Promise.resolve(pythonService.object));
+        }))).returns(() => Promise.resolve(pythonService));
         this.setupSupportedPythonService(pythonService, interpreter, supportedCommands);
 
         // Then the process calls
@@ -333,6 +332,10 @@ export class MockJupyter implements IJupyterSessionManager {
         }
     }
 
+    public getActiveKernelSpecs(connection: IConnection) : Promise<IJupyterKernelSpec[]> {
+        return Promise.resolve([]);
+    }
+
     private createTempSpec(pythonPath: string): string {
         const tempDir = os.tmpdir();
         const subDir = uuid();
@@ -362,42 +365,17 @@ export class MockJupyter implements IJupyterSessionManager {
         return result;
     }
 
-    private argsMatch(matchers: (string | RegExp)[], args: string[]): boolean {
-        if (matchers.length === args.length) {
-            return args.every((s, i) => {
-                const r = matchers[i] as RegExp;
-                return r && r.test ? r.test(s) : s === matchers[i];
-            });
-        }
-        return false;
+    private setupPythonService(service: MockPythonService, module: string, args: (string | RegExp)[], result: () => Promise<ExecutionResult<string>>) {
+        service.addExecModuleResult(module, args, result);
     }
 
-    private setupPythonService(service: TypeMoq.IMock<IPythonExecutionService>, module: string, args: (string | RegExp)[], result: Promise<ExecutionResult<string>>) {
-        service.setup(x => x.execModule(
-            TypeMoq.It.isValue(module),
-            TypeMoq.It.is(a => this.argsMatch(args, a)),
-            TypeMoq.It.isAny()))
-            .returns(() => result);
+    private setupProcessServiceExec(service: MockProcessService, file: string, args: (string | RegExp)[], result: () => Promise<ExecutionResult<string>>) {
+        service.addExecResult(file, args, result);
     }
 
-    private setupProcessServiceExec(service: TypeMoq.IMock<IProcessService>, file: string, args: (string | RegExp)[], result: Promise<ExecutionResult<string>>) {
-        service.setup(x => x.exec(
-            TypeMoq.It.isValue(file),
-            TypeMoq.It.is(a => this.argsMatch(args, a)),
-            TypeMoq.It.isAny()))
-            .returns(() => result);
-    }
-
-    private setupProcessServiceExecWithFunc(service: TypeMoq.IMock<IProcessService>, file: string, args: (string | RegExp)[], result: () => Promise<ExecutionResult<string>>) {
-        service.setup(x => x.exec(
-            TypeMoq.It.isValue(file),
-            TypeMoq.It.is(a => this.argsMatch(args, a)),
-            TypeMoq.It.isAny()))
-            .returns(result);
-    }
-
-    private setupProcessServiceExecObservable(service: TypeMoq.IMock<IProcessService>, file: string, args: (string | RegExp)[], stderr: string[], stdout: string[]) {
-        const result: ObservableExecutionResult<string> = {
+    private setupProcessServiceExecObservable(service: MockProcessService, file: string, args: (string | RegExp)[], stderr: string[], stdout: string[]) {
+        service.addExecObservableResult(file, args, () => {
+        return {
             proc: undefined,
             out: new Observable<Output<string>>(subscriber => {
                 stderr.forEach(s => subscriber.next({ source: 'stderr', out: s }));
@@ -406,36 +384,21 @@ export class MockJupyter implements IJupyterSessionManager {
             dispose: () => {
                 noop();
             }
-        };
-
-        service.setup(x => x.execObservable(
-            TypeMoq.It.isValue(file),
-            TypeMoq.It.is(a => this.argsMatch(args, a)),
-            TypeMoq.It.isAny()))
-            .returns(() => result);
+        }});
     }
 
-    private setupSupportedPythonService(service: TypeMoq.IMock<IPythonExecutionService>, workingPython: PythonInterpreter, supportedCommands: SupportedCommands) {
+    private setupSupportedPythonService(service: MockPythonService, workingPython: PythonInterpreter, supportedCommands: SupportedCommands) {
         if ((supportedCommands & SupportedCommands.ipykernel) === SupportedCommands.ipykernel) {
-            this.setupPythonService(service, 'ipykernel', ['--version'], Promise.resolve({ stdout: '1.1.1.1' }));
+            this.setupPythonService(service, 'ipykernel', ['--version'], () => Promise.resolve({ stdout: '1.1.1.1' }));
         }
         if ((supportedCommands & SupportedCommands.nbconvert) === SupportedCommands.nbconvert) {
-            this.setupPythonService(service, 'jupyter', ['nbconvert', '--version'], Promise.resolve({ stdout: '1.1.1.1' }));
+            this.setupPythonService(service, 'jupyter', ['nbconvert', '--version'], () => Promise.resolve({ stdout: '1.1.1.1' }));
         }
         if ((supportedCommands & SupportedCommands.notebook) === SupportedCommands.notebook) {
-            this.setupPythonService(service, 'jupyter', ['notebook', '--version'], Promise.resolve({ stdout: '1.1.1.1' }));
+            this.setupPythonService(service, 'jupyter', ['notebook', '--version'], () => Promise.resolve({ stdout: '1.1.1.1' }));
         }
         if ((supportedCommands & SupportedCommands.kernelspec) === SupportedCommands.kernelspec) {
-            this.setupPythonService(service, 'jupyter', ['kernelspec', '--version'], Promise.resolve({ stdout: '1.1.1.1' }));
-        }
-        if (supportedCommands == SupportedCommands.none) {
-            service.setup(x => x.execModule(TypeMoq.It.isAny(), TypeMoq.It.isAny(), TypeMoq.It.isAny()))
-            .returns((v) => {
-                return Promise.reject('cant exec');
-            });
-            service.setup(x => x.getInterpreterInformation()).returns(() => Promise.resolve(workingPython));
-        } else {
-            service.setup(x => x.getInterpreterInformation()).returns(() => Promise.resolve(workingPython));
+            this.setupPythonService(service, 'jupyter', ['kernelspec', '--version'], () => Promise.resolve({ stdout: '1.1.1.1' }));
         }
     }
 
@@ -448,61 +411,61 @@ export class MockJupyter implements IJupyterSessionManager {
     private setupSupportedProcessService(workingPython: PythonInterpreter, supportedCommands: SupportedCommands, notebookStdErr?: string[]) {
         if ((supportedCommands & SupportedCommands.ipykernel) === SupportedCommands.ipykernel) {
             // Don't mind the goofy path here. It's supposed to not find the item on your box. It's just testing the internal regex works
-            this.setupProcessServiceExecWithFunc(this.processService, workingPython.path, ['-m', 'jupyter', 'kernelspec', 'list'], () => {
+            this.setupProcessServiceExec(this.processService, workingPython.path, ['-m', 'jupyter', 'kernelspec', 'list'], () => {
                 const results = this.kernelSpecs.map(k => {
                     return `  ${k.name}  ${k.dir}`;
                 }).join(os.EOL);
                 return Promise.resolve({stdout: results});
             });
-            this.setupProcessServiceExecWithFunc(this.processService, workingPython.path, ['-m', 'ipykernel', 'install', '--user', '--name', /\w+-\w+-\w+-\w+-\w+/, '--display-name', `'Python Interactive'`], () => {
+            this.setupProcessServiceExec(this.processService, workingPython.path, ['-m', 'ipykernel', 'install', '--user', '--name', /\w+-\w+-\w+-\w+-\w+/, '--display-name', `'Python Interactive'`], () => {
                 this.ipykernelInstallCount += 1;
                 const spec = this.addKernelSpec(workingPython.path);
                 return Promise.resolve({ stdout: `somename ${path.dirname(spec)}` });
             });
             const getServerInfoPath = path.join(EXTENSION_ROOT_DIR, 'pythonFiles', 'datascience', 'getServerInfo.py');
-            this.setupProcessServiceExec(this.processService, workingPython.path, [getServerInfoPath], Promise.resolve({ stdout: 'failure to get server infos' }));
+            this.setupProcessServiceExec(this.processService, workingPython.path, [getServerInfoPath], () => Promise.resolve({ stdout: 'failure to get server infos' }));
             this.setupProcessServiceExecObservable(this.processService, workingPython.path, ['-m', 'jupyter', 'kernelspec', 'list'], [], []);
             this.setupProcessServiceExecObservable(this.processService, workingPython.path, ['-m', 'jupyter', 'notebook', '--no-browser', /--notebook-dir=.*/, /.*/], [], notebookStdErr ? notebookStdErr : ['http://localhost:8888/?token=198']);
         } else if ((supportedCommands & SupportedCommands.notebook) === SupportedCommands.notebook) {
-            this.setupProcessServiceExecWithFunc(this.processService, workingPython.path, ['-m', 'jupyter', 'kernelspec', 'list'], () => {
+            this.setupProcessServiceExec(this.processService, workingPython.path, ['-m', 'jupyter', 'kernelspec', 'list'], () => {
                 const results = this.kernelSpecs.map(k => {
                     return `  ${k.name}  ${k.dir}`;
                 }).join(os.EOL);
                 return Promise.resolve({stdout: results});
             });
             const getServerInfoPath = path.join(EXTENSION_ROOT_DIR, 'pythonFiles', 'datascience', 'getServerInfo.py');
-            this.setupProcessServiceExec(this.processService, workingPython.path, [getServerInfoPath], Promise.resolve({ stdout: 'failure to get server infos' }));
+            this.setupProcessServiceExec(this.processService, workingPython.path, [getServerInfoPath], () => Promise.resolve({ stdout: 'failure to get server infos' }));
             this.setupProcessServiceExecObservable(this.processService, workingPython.path, ['-m', 'jupyter', 'kernelspec', 'list'], [], []);
             this.setupProcessServiceExecObservable(this.processService, workingPython.path, ['-m', 'jupyter', 'notebook', '--no-browser', /--notebook-dir=.*/, /.*/], [], notebookStdErr ? notebookStdErr : ['http://localhost:8888/?token=198']);
         }
     }
 
-    private setupPathProcessService(jupyterPath: string, service: TypeMoq.IMock<IProcessService>, supportedCommands: SupportedCommands, notebookStdErr?: string[]) {
+    private setupPathProcessService(jupyterPath: string, service: MockProcessService, supportedCommands: SupportedCommands, notebookStdErr?: string[]) {
         if ((supportedCommands & SupportedCommands.kernelspec) === SupportedCommands.kernelspec) {
-            this.setupProcessServiceExecWithFunc(service, jupyterPath, ['kernelspec', 'list'], () => {
+            this.setupProcessServiceExec(service, jupyterPath, ['kernelspec', 'list'], () => {
                 const results = this.kernelSpecs.map(k => {
                     return `  ${k.name}  ${k.dir}`;
                 }).join(os.EOL);
                 return Promise.resolve({stdout: results});
             });
             this.setupProcessServiceExecObservable(service, jupyterPath, ['kernelspec', 'list'], [], []);
-            this.setupProcessServiceExec(service, jupyterPath, ['kernelspec', '--version'], Promise.resolve({ stdout: '1.1.1.1' }));
-            this.setupProcessServiceExec(service, 'jupyter', ['kernelspec', '--version'], Promise.resolve({ stdout: '1.1.1.1' }));
+            this.setupProcessServiceExec(service, jupyterPath, ['kernelspec', '--version'],() =>  Promise.resolve({ stdout: '1.1.1.1' }));
+            this.setupProcessServiceExec(service, 'jupyter', ['kernelspec', '--version'], () => Promise.resolve({ stdout: '1.1.1.1' }));
         } else {
-            this.setupProcessServiceExec(service, jupyterPath, ['kernelspec', '--version'], Promise.reject());
-            this.setupProcessServiceExec(service, 'jupyter', ['kernelspec', '--version'], Promise.reject());
+            this.setupProcessServiceExec(service, jupyterPath, ['kernelspec', '--version'], () => Promise.reject());
+            this.setupProcessServiceExec(service, 'jupyter', ['kernelspec', '--version'], () => Promise.reject());
         }
 
-        this.setupProcessServiceExec(service, jupyterPath, ['--version'], Promise.resolve({ stdout: '1.1.1.1' }));
-        this.setupProcessServiceExec(service, 'jupyter', ['--version'], Promise.resolve({ stdout: '1.1.1.1' }));
+        this.setupProcessServiceExec(service, jupyterPath, ['--version'], () => Promise.resolve({ stdout: '1.1.1.1' }));
+        this.setupProcessServiceExec(service, 'jupyter', ['--version'], () => Promise.resolve({ stdout: '1.1.1.1' }));
 
         if ((supportedCommands & SupportedCommands.kernelspec) === SupportedCommands.kernelspec) {
-            this.setupProcessServiceExec(service, jupyterPath, ['notebook', '--version'], Promise.resolve({ stdout: '1.1.1.1' }));
+            this.setupProcessServiceExec(service, jupyterPath, ['notebook', '--version'], () => Promise.resolve({ stdout: '1.1.1.1' }));
             this.setupProcessServiceExecObservable(service, jupyterPath, ['notebook', '--no-browser', /--notebook-dir=.*/, /.*/], [], notebookStdErr ? notebookStdErr : ['http://localhost:8888/?token=198']);
-            this.setupProcessServiceExec(service, 'jupyter', ['notebook', '--version'], Promise.resolve({ stdout: '1.1.1.1' }));
+            this.setupProcessServiceExec(service, 'jupyter', ['notebook', '--version'], () => Promise.resolve({ stdout: '1.1.1.1' }));
         } else {
-            this.setupProcessServiceExec(service, 'jupyter', ['notebook', '--version'], Promise.reject());
-            this.setupProcessServiceExec(service, jupyterPath, ['notebook', '--version'], Promise.reject());
+            this.setupProcessServiceExec(service, 'jupyter', ['notebook', '--version'], () => Promise.reject());
+            this.setupProcessServiceExec(service, jupyterPath, ['notebook', '--version'], () => Promise.reject());
         }
     }
 }

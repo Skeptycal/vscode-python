@@ -36,7 +36,8 @@ import { IServiceContainer } from '../../ioc/types';
 import { captureTelemetry } from '../../telemetry';
 import { Telemetry } from '../constants';
 import { JupyterConnection, JupyterServerInfo } from './jupyterConnection';
-import { IConnection, IJupyterExecution, IJupyterKernelSpec, INotebookServer } from '../types';
+import { IConnection, IJupyterExecution, IJupyterKernelSpec, INotebookServer, IJupyterSessionManager } from '../types';
+import { JupyterKernelSpec } from './jupyterKernelSpec';
 
 const CheckJupyterRegEx = IS_WINDOWS ? /^jupyter?\.exe$/ : /^jupyter?$/;
 const NotebookCommand = 'notebook';
@@ -45,33 +46,6 @@ const KernelSpecCommand = 'kernelspec';
 const KernelCreateCommand = 'ipykernel';
 const PyKernelOutputRegEx = /.*\s+(.+)$/m;
 const KernelSpecOutputRegEx = /^\s*(\S+)\s+(\S+)$/;
-const IsGuidRegEx = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
-class JupyterKernelSpec implements IJupyterKernelSpec {
-    public name: string;
-    public language: string;
-    public path: string;
-    public specFile: string | undefined;
-    constructor(specModel : Kernel.ISpecModel, file?: string) {
-        this.name = specModel.name;
-        this.language = specModel.language;
-        this.path = specModel.argv.length > 0 ? specModel.argv[0] : '';
-        this.specFile = file;
-    }
-    public dispose = async () => {
-        if (this.specFile &&
-            IsGuidRegEx.test(path.basename(path.dirname(this.specFile)))) {
-            // There is more than one location for the spec file directory
-            // to be cleaned up. If one fails, the other likely deleted it already.
-            try {
-                await fs.remove(path.dirname(this.specFile));
-            } catch {
-                noop();
-            }
-            this.specFile = undefined;
-        }
-    }
-}
 
 // JupyterCommand objects represent some process that can be launched that should be guaranteed to work because it
 // was found by testing it previously
@@ -163,6 +137,7 @@ export class JupyterExecution implements IJupyterExecution, Disposable {
                 @inject(IDisposableRegistry) private disposableRegistry: IDisposableRegistry,
                 @inject(IAsyncDisposableRegistry) private asyncRegistry: IAsyncDisposableRegistry,
                 @inject(IFileSystem) private fileSystem: IFileSystem,
+                @inject(IJupyterSessionManager) private sessionManager: IJupyterSessionManager,
                 @inject(IServiceContainer) private serviceContainer: IServiceContainer) {
         this.processServicePromise = this.processServiceFactory.create();
         this.disposableRegistry.push(this.interpreterService.onDidChangeInterpreter(this.onSettingsChanged));
@@ -298,7 +273,7 @@ export class JupyterExecution implements IJupyterExecution, Disposable {
         }
 
         // Now enumerate them again
-        const enumerator = connection ? () => this.getActiveKernelSpecs(connection) : () => this.enumerateSpecs(cancelToken);
+        const enumerator = connection ? () => this.sessionManager.getActiveKernelSpecs(connection) : () => this.enumerateSpecs(cancelToken);
 
         // Then find our match
         return this.findSpecMatch(enumerator);
@@ -675,31 +650,6 @@ export class JupyterExecution implements IJupyterExecution, Disposable {
         }
 
         return bestSpec;
-    }
-
-    private getActiveKernelSpecs = async (connection: IConnection) : Promise<IJupyterKernelSpec[]> => {
-        // Use our connection to create a session manager
-        const serverSettings = ServerConnection.makeSettings(
-            {
-                baseUrl: connection.baseUrl,
-                token: connection.token,
-                pageUrl: '',
-                // A web socket is required to allow token authentication (what if there is no token authentication?)
-                wsUrl: connection.baseUrl.replace('http', 'ws'),
-                init: { cache: 'no-store', credentials: 'same-origin' }
-            });
-        const sessionManager = new SessionManager({ serverSettings: serverSettings });
-
-        // Ask the session manager to refresh its list of kernel specs.
-        await sessionManager.refreshSpecs();
-
-        // Enumerate all of the kernel specs, turning each into a JupyterKernelSpec
-        const kernelspecs = sessionManager.specs && sessionManager.specs.kernelspecs ? sessionManager.specs.kernelspecs : {};
-        const keys = Object.keys(kernelspecs);
-        return keys.map(k => {
-            const spec = kernelspecs[k];
-            return new JupyterKernelSpec(spec);
-        });
     }
 
     private async readSpec(kernelSpecOutputLine: string) : Promise<JupyterKernelSpec | undefined> {
