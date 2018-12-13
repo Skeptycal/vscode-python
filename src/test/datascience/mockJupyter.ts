@@ -50,10 +50,12 @@ import { KernelMessage, Kernel } from '@jupyterlab/services';
 import { createDeferred, Deferred } from '../../client/common/utils/async';
 import { MockPythonService } from './mockPythonService';
 import { MockProcessService } from './mockProcessService';
+import { concatMultilineString } from '../../client/datascience/common';
 
 // tslint:disable:no-any no-http-string no-multiline-string max-func-body-length
 
 const MockJupyterTimeDelay = 10;
+const LineFeedRegEx = /(\r\n|\n)/g
 
 export enum SupportedCommands {
     none = 0,
@@ -67,12 +69,16 @@ export enum SupportedCommands {
 class MockJupyterRequest implements Kernel.IFuture {
     private deferred: Deferred<KernelMessage.IShellMessage> = createDeferred<KernelMessage.IShellMessage>();
     private failing = false;
+    private executionCount: number;
     public msg: KernelMessage.IShellMessage;
     public onReply: (msg: KernelMessage.IShellMessage) => void | PromiseLike<void>;
     public onStdin: (msg: KernelMessage.IStdinMessage) => void | PromiseLike<void>;
     public onIOPub: (msg: KernelMessage.IIOPubMessage) => void | PromiseLike<void>;
 
-    constructor(cell: ICell, delay: number) {
+    constructor(cell: ICell, delay: number, executionCount: number) {
+        // Save our execution count, this is like our id
+        this.executionCount = executionCount;
+
         // Start our sequence of events that is our cell running
         this.executeRequest(cell, delay);
     }
@@ -107,6 +113,10 @@ class MockJupyterRequest implements Kernel.IFuture {
         return this.generateMessage(msgType, result, 'shell') as KernelMessage.IShellMessage;
     }
 
+    private generateStreamMessage(msgType: string, name: string, text: nbformat.MultilineString) : KernelMessage.IStreamMsg {
+        return this.generateIOPubMessage(msgType, { name: name, text: text}) as KernelMessage.IStreamMsg;
+    }
+
     private generateMessage(msgType: string, result: any, channel: string = 'iopub') : KernelMessage.IMessage {
         return {
             channel: 'iopub',
@@ -127,11 +137,28 @@ class MockJupyterRequest implements Kernel.IFuture {
         };
     }
 
+    private generateResultMessages(cell: ICell) : (() => KernelMessage.IMessage)[] {
+        const outputs = cell.data.outputs as nbformat.IOutput[];
+        return outputs.map((o: nbformat.IBaseOutput) => {
+            return () => this.generateIOPubMessage(o.output_type, o);
+        })
+    }
+
     private executeRequest(cell: ICell, delay: number) {
+        // Get our results we'll stick in the middle
+        const resultMessages = this.generateResultMessages(cell);
+
+
         this.sendMessages([
-            () => this.generateIOPubMessage('status', { status: 'idle'}),
-            () => this.generateIOPubMessage('execute_input', { status: 'idle'}),
-            () => { const result = this.generateShellMessage('done', {status: 'idle'}); this.deferred.resolve(result); return result; }
+            // The order of messages should be:
+            // 1 - Status busy
+            // 2 - Execute input
+            // 3 - N - Results
+            // N + 1 - Status idle
+            () => this.generateIOPubMessage('status', { execution_state: 'busy'}),
+            () => this.generateIOPubMessage('execute_input', { code: concatMultilineString(cell.data.source), execution_count: this.executionCount }),
+            ...resultMessages,
+            () => this.generateIOPubMessage('status', { execution_state: 'idle'}),
         ], delay);
     }
 
@@ -155,6 +182,10 @@ class MockJupyterRequest implements Kernel.IFuture {
                     }
                 }
             }, delay);
+        } else {
+            // No more messages, finish
+            const message = this.generateMessage('done', {status: 'success'}, 'shell');
+            this.deferred.resolve(message as KernelMessage.IShellMessage);
         }
     }
 
@@ -165,6 +196,7 @@ class MockJupyterSession implements IJupyterSession {
     private dict: {[index: string] : ICell};
     private restartedEvent: EventEmitter<void> = new EventEmitter<void>();
     private timedelay: number;
+    private executionCount: number = 0;
     private outstandingRequests: MockJupyterRequest[] = [];
 
     public get onRestarted() : Event<void> {
@@ -188,7 +220,8 @@ class MockJupyterSession implements IJupyterSession {
         const cell = this.findCell(content.code);
 
         // Create a new dummy request
-        const request = new MockJupyterRequest(cell, this.timedelay);
+        this.executionCount += 1;
+        const request = new MockJupyterRequest(cell, this.timedelay, this.executionCount);
         this.outstandingRequests.push(request);
 
         // When it finishes, it should not be an outstanding request anymore
@@ -210,10 +243,14 @@ class MockJupyterSession implements IJupyterSession {
     }
 
     private findCell = (code : string) : ICell => {
-        if (this.dict.hasOwnProperty(code)) {
-            return this.dict[code] as ICell;
+        // Match skipping line separators
+        const withoutLines = code.replace(LineFeedRegEx, '');
+
+        if (this.dict.hasOwnProperty(withoutLines)) {
+            return this.dict[withoutLines] as ICell;
         }
 
+        console.log(`Cell ${code.splitLines()[0]} not found in mock`);
         throw new Error(`Cell ${code.splitLines()[0]} not found in mock`);
     }
 
@@ -263,6 +300,10 @@ export class MockJupyter implements IJupyterSessionManager {
 
         // Setup our default kernel spec (this is just a dummy value)
         this.kernelSpecs.push({name: '0e8519db-0895-416c-96df-fa80131ecea0', dir: 'C:\\Users\\rchiodo\\AppData\\Roaming\\jupyter\\kernels\\0e8519db-0895-416c-96df-fa80131ecea0'});
+
+        // Setup our default cells that happen for everything
+        this.addCell('%matplotlib inline\r\nimport matplotlib.pyplot as plt');
+        this.addCell(`%cd "${path.join(EXTENSION_ROOT_DIR, 'src', 'test', 'datascience')}"`);
     }
 
     public makeActive(interpreter: PythonInterpreter) {
@@ -290,21 +331,26 @@ export class MockJupyter implements IJupyterSessionManager {
         this.setupPathProcessService(jupyterPath, this.processService, supportedCommands, notebookStdErr);
     }
 
-    public addCell(code: string, result: string, mimeType?: string) {
+    public addError(code:string, message: string) {
+        // Turn the message into an nbformat.IError
+        const result: nbformat.IError = {
+            output_type: 'error',
+            ename: message,
+            evalue: message,
+            traceback: []
+        }
+
+        this.addCell(code, result);
+    }
+
+    public addCell(code: string, result?: undefined | string | number | nbformat.IUnrecognizedOutput | nbformat.IExecuteResult | nbformat.IDisplayData | nbformat.IStream | nbformat.IError, mimeType?: string) {
         const cells = generateCells(code, 'foo.py', 1, true);
         cells.forEach(c => {
-            const key = c.data.source.toString();
+            const key = concatMultilineString(c.data.source).replace(LineFeedRegEx, '');
             if (c.data.cell_type === 'code') {
-                // Update outputs based on mime type
-                const output: nbformat.IStream = {
-                    output_type: 'stream',
-                    name: 'stdout',
-                    text: result
-                };
-                output.data = {};
-                output.data[mimeType ? mimeType : 'text/plain'] = result;
+                const massagedResult = this.massageCellResult(result, mimeType);
                 const data: nbformat.ICodeCell = c.data as nbformat.ICodeCell;
-                data.outputs = [...data.outputs, output];
+                data.outputs = [...data.outputs, massagedResult];
                 c.data = data;
             }
 
@@ -312,7 +358,7 @@ export class MockJupyter implements IJupyterSessionManager {
             // Note: Our entire setup is recreated each test so this dictionary
             // should be unique per test
             this.cellDictionary[key] = c;
-        })
+        });
     }
 
     public setWaitTime(timeout: number | undefined) {
@@ -334,6 +380,44 @@ export class MockJupyter implements IJupyterSessionManager {
 
     public getActiveKernelSpecs(connection: IConnection) : Promise<IJupyterKernelSpec[]> {
         return Promise.resolve([]);
+    }
+
+    private massageCellResult(
+        result: undefined | string | number | nbformat.IUnrecognizedOutput | nbformat.IExecuteResult | nbformat.IDisplayData | nbformat.IStream | nbformat.IError,
+        mimeType?: string) :
+        nbformat.IUnrecognizedOutput | nbformat.IExecuteResult | nbformat.IDisplayData | nbformat.IStream | nbformat.IError {
+
+        // See if undefined or string or number
+        if (!result) {
+            // This is an empty execute result
+            const massaged : nbformat.IExecuteResult = {
+                output_type: 'execute_result',
+                execution_count: 1,
+                data: {},
+                metadata : {}
+            };
+            return massaged;
+        } else if (typeof result === 'string') {
+            const data = {};
+            data[mimeType ? mimeType : 'text/plain'] = result;
+            const massaged: nbformat.IExecuteResult = {
+                output_type: 'execute_result',
+                execution_count: 1,
+                data: data,
+                metadata: {}
+            };
+            return massaged;
+        } else if (typeof result === 'number') {
+            const massaged : nbformat.IExecuteResult = {
+                output_type: 'execute_result',
+                execution_count: 1,
+                data: { 'text/plain' : result.toString() },
+                metadata : {}
+            };
+            return massaged;
+        } else {
+            return result;
+        }
     }
 
     private createTempSpec(pythonPath: string): string {

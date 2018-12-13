@@ -170,8 +170,13 @@ suite('Jupyter notebook tests', () => {
         }
     }
 
-    function testMimeTypes(types : {code: string; mimeType: string; cellType: string; verifyValue(data: any): void}[]) {
+    function testMimeTypes(types : {code: string; mimeType: string; result: any, cellType: string; verifyValue(data: any): void}[]) {
         runTest('MimeTypes', async () => {
+            // Prefill with the output (This is only necessary for mocking)
+            types.forEach(t => {
+                addMockData(t.code, t.result, t.mimeType, t.cellType);
+            })
+
             // Test all mime types together so we don't have to startup and shutdown between
             // each
             const server = await createNotebookServer(true);
@@ -215,6 +220,16 @@ suite('Jupyter notebook tests', () => {
         } catch (exc) {
             if (!expectFailure) {
                 assert.ok(false, `Expected server to be created, but got ${exc}`);
+            }
+        }
+    }
+
+    function addMockData(code: string, result: string | number, mimeType?: string, cellType?: string) {
+        if (ioc.mockJupyter) {
+            if (cellType && cellType === 'error') {
+                ioc.mockJupyter.addError(code, result.toString());
+            } else {
+                ioc.mockJupyter.addCell(code, result, mimeType);
             }
         }
     }
@@ -320,6 +335,11 @@ suite('Jupyter notebook tests', () => {
     });
 
     runTest('Restart kernel', async () => {
+        addMockData(`a=1${os.EOL}a`, 1);
+        addMockData(`a+=1${os.EOL}a`, 2);
+        addMockData(`a+=4${os.EOL}a`, 6);
+        addMockData('a', `name 'a' is not defined`, 'error');
+
         const server = await createNotebookServer(true);
 
         // Setup some state and verify output is correct
@@ -495,6 +515,7 @@ while keep_going:
 a`,
                 mimeType: 'text/plain',
                 cellType: 'code',
+                result: 1,
                 verifyValue: (d) => assert.equal(d, 1, 'Plain text invalid')
             },
             {
@@ -503,6 +524,7 @@ a`,
 df = pd.read("${escapePath(path.join(srcDirectory(), 'DefaultSalesReport.csv'))}")
 df.head()`,
                 mimeType: 'text/html',
+                result: `pd has no attribute 'read'`,
                 cellType: 'error',
                 // tslint:disable-next-line:quotemark
                 verifyValue: (d) => assert.ok((d as string).includes("has no attribute 'read'"), 'Unexpected error result')
@@ -513,6 +535,7 @@ df.head()`,
 df = pd.read_csv("${escapePath(path.join(srcDirectory(), 'DefaultSalesReport.csv'))}")
 df.head()`,
                 mimeType: 'text/html',
+                result: `<td>A table</td>`,
                 cellType: 'code',
                 verifyValue: (d) => assert.ok(d.toString().includes('</td>'), 'Table not found')
             },
@@ -522,6 +545,7 @@ df.head()`,
 # #HEADER`,
                 mimeType: 'text/plain',
                 cellType: 'markdown',
+                result: '#HEADER',
                 verifyValue: (d) => assert.equal(d, '#HEADER', 'Markdown incorrect')
             },
             {
@@ -532,6 +556,7 @@ df = pd.read_csv("./DefaultSalesReport.csv")
 df.head()`,
                 mimeType: 'text/html',
                 cellType: 'code',
+                result: `<td>A table</td>`,
                 verifyValue: (d) => assert.ok(d.toString().includes('</td>'), 'Table not found')
             },
             {
@@ -544,6 +569,7 @@ import pandas as pd
 x = np.linspace(0, 20, 100)
 plt.plot(x, np.sin(x))
 plt.show()`,
+                result: `00000`,
                 mimeType: 'image/png',
                 cellType: 'code',
                 verifyValue: (d) => { return; }
