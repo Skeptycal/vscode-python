@@ -62,7 +62,7 @@ export class MockProcessService implements IProcessService {
             return match.result();
         }
 
-        return this.defaultObservable();
+        return this.defaultObservable([file, ...args]);
     }
     public exec(file:string, args: string[], options: SpawnOptions): Promise<ExecutionResult<string>> {
         const match = this.execResults.find(f => this.argsMatch(f.args, args) && f.file === file);
@@ -70,12 +70,12 @@ export class MockProcessService implements IProcessService {
             return match.result();
         }
 
-        return this.defaultExecutionResult();
+        return this.defaultExecutionResult([file, ...args]);
     }
 
     public shellExec(command:string, options: ShellOptions) : Promise<ExecutionResult<string>> {
         // Not supported
-        return this.defaultExecutionResult();
+        return this.defaultExecutionResult([command]);
     }
 
     public addExecResult(file:string, args: (string | RegExp)[], result:() => Promise<ExecutionResult<string>>) {
@@ -96,8 +96,8 @@ export class MockProcessService implements IProcessService {
         return false;
     }
 
-    private defaultObservable() : ObservableExecutionResult<string> {
-        const output = new Observable<Output<string>>(subscriber => { subscriber.next({out: 'Invalid call', source: 'stderr'}); });
+    private defaultObservable(args: string []) : ObservableExecutionResult<string> {
+        const output = new Observable<Output<string>>(subscriber => { subscriber.next({out: `Invalid call to ${args.join(' ')}`, source: 'stderr'}); });
         return {
             proc: undefined,
             out: output,
@@ -105,8 +105,8 @@ export class MockProcessService implements IProcessService {
         };
     }
 
-    private defaultExecutionResult() : Promise<ExecutionResult<string>> {
-        return Promise.resolve({stderr: 'Invalid call', stdout: ''});
+    private defaultExecutionResult(args: string[]) : Promise<ExecutionResult<string>> {
+        return Promise.resolve({stderr: `Invalid call to ${args.join(' ')}`, stdout: ''});
     }
 
 }
