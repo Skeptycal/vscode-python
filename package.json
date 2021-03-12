@@ -2012,7 +2012,7 @@
         "prismjs": "^1.15.0",
         "raw-loader": "^0.5.1",
         "react": "^16.5.2",
-        "react-dev-utils": "^5.0.2",
+        "react-dev-utils": "^11.0.4",
         "react-dom": "^16.5.2",
         "react-json-tree": "^0.11.0",
         "relative": "^3.0.2",
